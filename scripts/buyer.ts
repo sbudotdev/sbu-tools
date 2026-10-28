@@ -30,7 +30,6 @@ async function payForAudit(packageName: string, version?: string): Promise<void>
   const result = await gateway.pay(`${apiUrl}/npm-audit`, {
     method: "POST",
     body: { package: packageName, version },
-    headers: { "content-type": "application/json" },
   });
   console.log(`paid ${result.formattedAmount} USDC, status ${result.status}, tx ${result.transaction}`);
   console.log(JSON.stringify(result.data, null, 2));
