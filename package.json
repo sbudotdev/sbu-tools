@@ -1,0 +1,27 @@
+{
+  "name": "sbu-tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node src/server.ts",
+    "test": "node --test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@circle-fin/x402-batching": "^4.0.0",
+    "@x402/core": "^2.28.0",
+    "@x402/evm": "^2.28.0",
+    "express": "^5.1.0",
+    "viem": "^2.57.13"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "^22.18.0",
+    "typescript": "^5.9.2"
+  }
+}
