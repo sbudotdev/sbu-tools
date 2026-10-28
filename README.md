@@ -49,6 +49,14 @@ npm test
 | `FACILITATOR_URL` | `https://gateway-api-testnet.circle.com` | Set `https://gateway-api.circle.com` for mainnet (real, irreversible USDC). |
 | `PORT` | `3000` | |
 
+Test as a buyer (testnet only): put `BUYER_PRIVATE_KEY` of a throwaway wallet in `.env`, fund it at [faucet.circle.com](https://faucet.circle.com) on Arc Testnet, then:
+
+```bash
+npm run buyer balance
+npm run buyer deposit 1
+npm run buyer pay lodash 4.17.15
+```
+
 Deploy: the `Dockerfile` runs as-is on Coolify, Fly.io or any Docker host, with a built-in health check on `GET /health`.
 
 ## Known limits
