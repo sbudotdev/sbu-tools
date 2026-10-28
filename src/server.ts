@@ -2,8 +2,10 @@ import express, { type Request, type RequestHandler } from "express";
 import { createGatewayMiddleware } from "@circle-fin/x402-batching/server";
 import { isAddress } from "viem";
 import { audit, NotFound } from "./audit.ts";
+import { openApiSpec } from "./openapi.ts";
 
-const PRICE_PER_AUDIT = "$0.01";
+const PRICE_PER_AUDIT_USD = "0.01";
+const DEFAULT_PUBLIC_URL = "https://api.sbu.dev";
 const MAX_BODY_SIZE = "1kb";
 const MAX_PACKAGE_NAME_LENGTH = 214;
 const NPM_PACKAGE_NAME = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
@@ -11,6 +13,7 @@ const PACKAGE_VERSION = /^[0-9A-Za-z.+-]{1,64}$/;
 const TESTNET_FACILITATOR_URL = "https://gateway-api-testnet.circle.com";
 
 const facilitatorUrl = process.env.FACILITATOR_URL ?? TESTNET_FACILITATOR_URL;
+const publicUrl = process.env.PUBLIC_URL ?? DEFAULT_PUBLIC_URL;
 const sellerAddress = process.env.SELLER_ADDRESS ?? "";
 if (!isAddress(sellerAddress)) throw new Error("SELLER_ADDRESS must be a valid EVM address");
 
@@ -51,7 +54,12 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true, facilitator: facilitatorUrl });
 });
 
-app.post("/npm-audit", rejectInvalidInputBeforePayment, gateway.require(PRICE_PER_AUDIT), async (req, res) => {
+const spec = openApiSpec(publicUrl, PRICE_PER_AUDIT_USD);
+app.get("/openapi.json", (_req, res) => {
+  res.json(spec);
+});
+
+app.post("/npm-audit", rejectInvalidInputBeforePayment, gateway.require(`$${PRICE_PER_AUDIT_USD}`), async (req, res) => {
   const { package: name, version } = req.body as AuditRequest;
   console.log(JSON.stringify({ event: "paid_call", package: name, ...paymentOf(req) }));
   try {
