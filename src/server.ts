@@ -1,66 +1,70 @@
-import express, { type RequestHandler } from "express";
+import express, { type Request, type RequestHandler } from "express";
 import { createGatewayMiddleware } from "@circle-fin/x402-batching/server";
 import { isAddress } from "viem";
 import { audit, NotFound } from "./audit.ts";
 
-// npm name rules: lowercase, url-safe, optional scope, max 214 chars
-const NAME = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
-const VERSION = /^[0-9A-Za-z.+-]{1,64}$/;
+const PRICE_PER_AUDIT = "$0.01";
+const MAX_BODY_SIZE = "1kb";
+const MAX_PACKAGE_NAME_LENGTH = 214;
+const NPM_PACKAGE_NAME = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
+const PACKAGE_VERSION = /^[0-9A-Za-z.+-]{1,64}$/;
+const TESTNET_FACILITATOR_URL = "https://gateway-api-testnet.circle.com";
 
-// Testnet unless explicitly overridden: mainnet moves real, irreversible USDC.
-const FACILITATOR = process.env.FACILITATOR_URL ?? "https://gateway-api-testnet.circle.com";
-const SELLER = process.env.SELLER_ADDRESS ?? "";
-if (!isAddress(SELLER)) throw new Error("SELLER_ADDRESS must be a valid EVM address");
+const facilitatorUrl = process.env.FACILITATOR_URL ?? TESTNET_FACILITATOR_URL;
+const sellerAddress = process.env.SELLER_ADDRESS ?? "";
+if (!isAddress(sellerAddress)) throw new Error("SELLER_ADDRESS must be a valid EVM address");
 
 const gateway = createGatewayMiddleware({
-  sellerAddress: SELLER,
-  facilitatorUrl: FACILITATOR,
+  sellerAddress,
+  facilitatorUrl,
   description: "npm package security verdict: CVEs, typosquatting, deprecation, staleness",
 });
 
+type AuditRequest = { package: string; version?: string };
 type Payment = { payer: string; amount: string; network: string; transaction?: string };
 
-// Runs before payment so a malformed request never costs the caller anything.
-const validate: RequestHandler = (req, res, next) => {
-  const { package: name, version } = req.body ?? {};
-  if (typeof name !== "string" || name.length > 214 || !NAME.test(name)) {
-    res.status(400).json({ error: "invalid package name" });
-    return;
-  }
-  if (version !== undefined && (typeof version !== "string" || !VERSION.test(version))) {
-    res.status(400).json({ error: "invalid version" });
-    return;
-  }
-  next();
+function isValidAuditRequest(body: unknown): body is AuditRequest {
+  const { package: name, version } = (body ?? {}) as Record<string, unknown>;
+  const isValidName = typeof name === "string" && name.length <= MAX_PACKAGE_NAME_LENGTH && NPM_PACKAGE_NAME.test(name);
+  const isValidVersion = version === undefined || (typeof version === "string" && PACKAGE_VERSION.test(version));
+  return isValidName && isValidVersion;
+}
+
+function paymentOf(req: Request): Payment | undefined {
+  return (req as Request & { payment?: Payment }).payment;
+}
+
+const rejectInvalidInputBeforePayment: RequestHandler = (req, res, next) => {
+  if (isValidAuditRequest(req.body)) return next();
+  res.status(400).json({ error: "body must be {\"package\": string, \"version\"?: string} with a valid npm name" });
 };
 
 export const app = express();
-app.use(express.json({ limit: "1kb" }));
+app.disable("x-powered-by");
+app.use(express.json({ limit: MAX_BODY_SIZE }));
 app.use((_req, res, next) => {
   res.setHeader("X-Powered-By", "sbu.dev");
   next();
 });
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, facilitator: FACILITATOR });
+  res.json({ ok: true, facilitator: facilitatorUrl });
 });
 
-app.post("/npm-audit", validate, gateway.require("$0.01"), async (req, res) => {
-  const { package: name, version } = req.body as { package: string; version?: string };
-  const payment = (req as typeof req & { payment?: Payment }).payment;
-  // ponytail: stdout is the payment ledger for now, move to SQLite when we need weekly counts
-  console.log(JSON.stringify({ event: "paid_call", package: name, ...payment }));
+app.post("/npm-audit", rejectInvalidInputBeforePayment, gateway.require(PRICE_PER_AUDIT), async (req, res) => {
+  const { package: name, version } = req.body as AuditRequest;
+  console.log(JSON.stringify({ event: "paid_call", package: name, ...paymentOf(req) }));
   try {
     res.json(await audit(name, version));
-  } catch (e) {
-    // ponytail: payment already settled here, upstream failures are not refunded
-    if (e instanceof NotFound) return res.status(404).json({ error: e.message });
-    console.error(e);
+  } catch (error) {
+    if (error instanceof NotFound) return res.status(404).json({ error: error.message });
+    console.error(error);
     res.status(502).json({ error: "upstream error" });
   }
 });
 
 if (import.meta.main) {
   const port = Number(process.env.PORT ?? 3000);
-  app.listen(port, () => console.log(`listening on :${port}, facilitator ${FACILITATOR}`));
+  const server = app.listen(port, () => console.log(`listening on :${port}, facilitator ${facilitatorUrl}`));
+  process.on("SIGTERM", () => server.close());
 }
